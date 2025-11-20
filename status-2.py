@@ -1,24 +1,63 @@
 import subprocess
+import sys
 import os
 
-# Complete paths for executable and YAML file
-EAC_PATH = r"\\JPMC\DEV\TMP\ds\tools\eac-cli\latest\eac.exe"  # or use the mapped drive, e.g., r"Z:\ds\tools\eac-cli\latest\eac.exe"
-YAML_PATH = r"I:\ds\cam-cardbasicinfo-infra-ode\deployments\ode1\deployment_apply.yaml"
+# Path to eac.exe (update if needed!)
+EAC_CLI_PATH = r"\\JPMC\DEV\TMP\ds\tools\eac-cli\latest\eac.exe"
 
-# Check that executable and YAML file exist before running
-print("Checking paths before running command:")
-print(f"EAC executable: {EAC_PATH} Exists? {os.path.isfile(EAC_PATH)}")
-print(f"YAML file: {YAML_PATH} Exists? {os.path.isfile(YAML_PATH)}")
+# Path to your deployment YAML file (update if needed!)
+DEPLOYMENT_YAML_PATH = r"I:\ds\cam-cardbasicinfo-infra-ode\deployments\ode1\deployment_apply.yaml"
 
-if not os.path.isfile(EAC_PATH):
-    print("ERROR: Cannot find eac.exe at the specified path.")
-elif not os.path.isfile(YAML_PATH):
-    print("ERROR: Cannot find deployment_apply.yaml at the specified path.")
+# Detect platform and set eac_command
+if os.name == 'nt':
+    eac_command = EAC_CLI_PATH
 else:
-    CMD = [EAC_PATH, "deployment", "status", "-f", YAML_PATH]
+    eac_command = "eac"  # Assume eac is in PATH on Unix-like
+
+def execute_eac_deployment_status_with_yaml(yaml_path):
+    """
+    Execute the EAC deployment status command with the deployment YAML file.
+    Returns exit code.
+    """
+    # Build the command
+    command = [eac_command, "deployment", "status", "-f", yaml_path]
+
+    print(f"Executing command: {' '.join(command)}")
+    print(f"YAML file: {yaml_path}")
+    print("-" * 60)
+
+    # Check if files exist
+    if not os.path.isfile(eac_command):
+        print(f"Error: EAC CLI not found at '{eac_command}'", file=sys.stderr)
+        print("Please verify the EAC_CLI_PATH variable is set correctly.", file=sys.stderr)
+        return 1
+    if not os.path.isfile(yaml_path):
+        print(f"Error: deployment YAML not found at '{yaml_path}'", file=sys.stderr)
+        return 1
+
     try:
-        result = subprocess.run(CMD, capture_output=True, text=True)
-        print("STDOUT:\n", result.stdout)
-        print("STDERR:\n", result.stderr)
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False
+        )
+        if result.stdout:
+            print("Output:")
+            print(result.stdout)
+        if result.stderr:
+            print("Error output:")
+            print(result.stderr, file=sys.stderr)
+        return result.returncode
     except Exception as e:
-        print("ERROR running subprocess:", e)
+        print(f"Error executing command: {e}", file=sys.stderr)
+        return 1
+
+def main():
+    """Main entry point for the script."""
+    exit_code = execute_eac_deployment_status_with_yaml(DEPLOYMENT_YAML_PATH)
+    sys.exit(exit_code)
+
+if __name__ == "__main__":
+    main()
