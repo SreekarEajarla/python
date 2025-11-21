@@ -270,6 +270,97 @@ def _extract_arns_from_yaml_data(data):
     return list(dict.fromkeys(arns))
 
 
+def extract_location_and_services_from_yaml(yaml_path):
+    """Extract awsRegion and component list from the deployment YAML.
+
+    Returns a tuple: (region_or_None, components_list)
+    Each component in components_list is a dict with at least keys 'type' and 'name'.
+    """
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to parse the inventory YAML. Install with 'pip install pyyaml'.")
+
+    if not os.path.exists(yaml_path):
+        raise FileNotFoundError(yaml_path)
+
+    with open(yaml_path, 'r', encoding='utf-8') as f:
+        parsed = yaml.safe_load(f)
+
+    # navigate common structure: spec -> environment -> awsRegion
+    region = None
+    try:
+        region = parsed.get('spec', {}).get('environment', {}).get('awsRegion')
+    except Exception:
+        region = None
+
+    # components may be under spec.components
+    components = []
+    try:
+        comps = parsed.get('spec', {}).get('components') or parsed.get('components') or []
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            comp = {
+                'type': c.get('type'),
+                'name': c.get('name'),
+                'properties': c.get('properties', {})
+            }
+            components.append(comp)
+    except Exception:
+        components = []
+
+    return region, components
+
+
+def compare_components_with_inventory(yaml_path, region=None, existing_resources=None):
+    """Compare components listed in the YAML to existing resources in `region`.
+
+    Returns list of { component, exists(bool), matches(list) }.
+    """
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to parse the inventory YAML. Install with 'pip install pyyaml'.")
+
+    parsed_region, components = extract_location_and_services_from_yaml(yaml_path)
+    if region is None:
+        region = parsed_region
+
+    if region is None:
+        raise ValueError("Region not specified in arguments or YAML; cannot compare components.")
+
+    if existing_resources is None:
+        result = get_all_services_using_resource_explorer(region=region)
+        existing_resources = result.get('resources', []) if result else []
+
+    matches_report = []
+    # prepare searchable fields
+    for comp in components:
+        cname = (comp.get('name') or '').lower()
+        ctype = (comp.get('type') or '').lower()
+        matches = []
+        for r in existing_resources:
+            rname = (r.get('Name') or '').lower()
+            rarn = (r.get('ARN') or r.get('Arn') or '')
+            rtype = (r.get('ResourceType') or '').lower()
+
+            found = False
+            if cname and rname and cname == rname:
+                found = True
+            elif cname and rarn and cname in rarn.lower():
+                found = True
+            elif ctype and ctype in rtype:
+                found = True
+
+            if found:
+                matches.append(r)
+
+        matches_report.append({
+            'component': comp,
+            'exists': len(matches) > 0,
+            'matches': matches
+        })
+
+    return region, matches_report
+
+
 def compare_arns_with_inventory(yaml_path, region, existing_resources=None):
     """Compare ARNs declared in `yaml_path` with existing resources in `region`.
 
@@ -410,20 +501,39 @@ if __name__ == "__main__":
     # If YAML file provided compare ARNs and print JSON report
     if args.file:
         try:
-            report = compare_arns_with_inventory(args.file, region=aggregator_region)
-            out_json = json.dumps(report, indent=2, default=str)
+            # First, extract region/components from YAML (region may override)
+            yaml_region, components = extract_location_and_services_from_yaml(args.file)
+            use_region = aggregator_region or yaml_region
+
+            # ARN-based comparison (if YAML contains ARNs)
+            arn_report = []
+            try:
+                arn_report = compare_arns_with_inventory(args.file, region=use_region)
+            except Exception as e:
+                # continue, but include error info
+                arn_report = {'error': str(e)}
+
+            # Component-based comparison (by name/type)
+            comp_report = []
+            try:
+                comp_region, comp_report = compare_components_with_inventory(args.file, region=use_region)
+            except Exception as e:
+                comp_report = {'error': str(e)}
+
+            combined = {
+                'yaml_region': yaml_region,
+                'use_region': use_region,
+                'arn_comparison': arn_report,
+                'components': comp_report
+            }
+
+            out_json = json.dumps(combined, indent=2, default=str)
             if args.output:
                 with open(args.output, 'w', encoding='utf-8') as of:
                     of.write(out_json)
                 print(f"Comparison written to {args.output}")
             else:
                 print(out_json)
-        except Exception as e:
-            print(f"Error comparing YAML ARNs: {e}")
 
-    # Optionally search for a specific service (interactive)
-    while True:
-        svc = input("\nEnter a service to search (e.g. 'ec2') or press Enter to exit: ").strip()
-        if not svc:
-            break
-        search_by_service(svc, region=aggregator_region)
+        except Exception as e:
+            print(f"Error comparing YAML: {e}")
