@@ -1,5 +1,3 @@
-# File: check_health_robust.py
-
 import yaml
 import boto3
 from botocore.exceptions import ClientError
@@ -185,7 +183,7 @@ def get_components_from_deployment(file_path):
 
 # --- Main Execution Logic ---
 if __name__ == "__main__":
-    deployment_file = '/home/siva_konda/EAC-python-code/deployment.yaml'
+    deployment_file = r'C:\Users\SivaReddyKonda\Saved Games\deployment_apply.yaml'
     
     # Load the entire deployment configuration
     config = get_deployment_config(deployment_file)
