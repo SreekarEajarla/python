@@ -1,3 +1,6 @@
+pip install boto3 pyyaml
+python aws_health_check.py /path/to/your/deployment.yaml
+
 import boto3
 import yaml
 import sys
