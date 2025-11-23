@@ -1,0 +1,1 @@
+eac deployment inventory -f deployment.yaml --json | jq '.. | objects | select(has("componentType") and has("componentName")) | {componentType, componentName}'
